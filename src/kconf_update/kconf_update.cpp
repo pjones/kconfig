@@ -84,6 +84,7 @@ protected:
     bool m_skipFile;
     bool m_bTestMode;
     bool m_bDebugOutput;
+    bool m_forceApply;
     QString m_id;
 
     QString m_oldFile;
@@ -142,11 +143,22 @@ KonfUpdate::KonfUpdate(QCommandLineParser *parser)
         QStandardPaths::setTestModeEnabled(true);
     }
 
+    m_forceApply = false;
     m_bUseConfigInfo = false;
     if (parser->isSet(QStringLiteral("check"))) {
         m_bUseConfigInfo = true;
         const QString file =
             QStandardPaths::locate(QStandardPaths::GenericDataLocation, QLatin1String{"kconf_update/"} + parser->value(QStringLiteral("check")));
+        if (file.isEmpty()) {
+            qWarning("File '%s' not found.", parser->value(QStringLiteral("check")).toLocal8Bit().data());
+            qCDebug(KCONF_UPDATE_LOG) << "File" << parser->value(QStringLiteral("check")) << "passed on command line not found";
+            return;
+        }
+        updateFiles.append(file);
+    } else if (parser->isSet(QStringLiteral("force"))) {
+        m_forceApply = true;
+        const QString file =
+            QStandardPaths::locate(QStandardPaths::GenericDataLocation, QLatin1String{"kconf_update/"} + parser->value(QStringLiteral("force")));
         if (file.isEmpty()) {
             qWarning("File '%s' not found.", parser->value(QStringLiteral("check")).toLocal8Bit().data());
             qCDebug(KCONF_UPDATE_LOG) << "File" << parser->value(QStringLiteral("check")) << "passed on command line not found";
@@ -416,7 +428,7 @@ void KonfUpdate::gotId(const QString &_id)
     // Check whether this update group needs to be done:
     KConfigGroup cg(m_config, m_currentFilename);
     QStringList ids = cg.readEntry("done", QStringList());
-    if (ids.contains(_id) && !m_bUseConfigInfo) {
+    if (ids.contains(_id) && !m_bUseConfigInfo && !m_forceApply) {
         // qDebug("Id '%s' was already in done-list", _id.toLatin1().constData());
         m_skip = true;
         return;
@@ -494,7 +506,7 @@ void KonfUpdate::gotFile(const QString &_file)
         const QString cfg_id = m_currentFilename + QLatin1Char{':'} + m_id;
         KConfigGroup cg(m_oldConfig2, "$Version");
         QStringList ids = cg.readEntry("update_info", QStringList());
-        if (ids.contains(cfg_id)) {
+        if (ids.contains(cfg_id) && !m_forceApply) {
             m_skip = true;
             m_newFile.clear();
             qCDebug(KCONF_UPDATE_LOG) << m_currentFilename << ": Skipping update" << m_id;
@@ -504,7 +516,7 @@ void KonfUpdate::gotFile(const QString &_file)
             m_newConfig = new KConfig(m_newFile, KConfig::NoGlobals);
             KConfigGroup cg(m_newConfig, "$Version");
             ids = cg.readEntry("update_info", QStringList());
-            if (ids.contains(cfg_id)) {
+            if (ids.contains(cfg_id) && !m_forceApply) {
                 m_skip = true;
                 qCDebug(KCONF_UPDATE_LOG) << m_currentFilename << ": Skipping update" << m_id;
             }
@@ -962,6 +974,9 @@ int main(int argc, char **argv)
                            QCoreApplication::translate("main", "For unit tests only: use test directories to stay away from the user's real files")));
     parser.addOption(QCommandLineOption(QStringList() << QStringLiteral("check"),
                                         QCoreApplication::translate("main", "Check whether config file itself requires updating"),
+                                        QStringLiteral("update-file")));
+    parser.addOption(QCommandLineOption(QStringList() << QStringLiteral("force"),
+                                        QCoreApplication::translate("main", "Allow updates to be applied more than once"),
                                         QStringLiteral("update-file")));
     parser.addPositionalArgument(QStringLiteral("files"),
                                  QCoreApplication::translate("main", "File(s) to read update instructions from"),
